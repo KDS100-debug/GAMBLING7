@@ -7,6 +7,15 @@ import {
   otpCodes,
   paymentRequests,
   withdrawalRequests,
+  cricketTeams,
+  cricketMatches,
+  cricketPlayers,
+  matchInnings,
+  ballEvents,
+  playerMatchStats,
+  fallOfWickets,
+  apiCallLogs,
+  cricketApiConfig,
   type User,
   type UpsertUser,
   type InsertTransaction,
@@ -19,6 +28,24 @@ import {
   type AviatorBet,
   type InsertOtpCode,
   type OtpCode,
+  type CricketTeam,
+  type InsertCricketTeam,
+  type CricketMatch,
+  type InsertCricketMatch,
+  type CricketPlayer,
+  type InsertCricketPlayer,
+  type MatchInnings,
+  type InsertMatchInnings,
+  type BallEvent,
+  type InsertBallEvent,
+  type PlayerMatchStats,
+  type InsertPlayerMatchStats,
+  type FallOfWickets,
+  type InsertFallOfWickets,
+  type ApiCallLog,
+  type InsertApiCallLog,
+  type CricketApiConfig,
+  type InsertCricketApiConfig,
 } from "@shared/schema";
 import { db } from "./db";
 import { eq, desc, and, sql } from "drizzle-orm";
@@ -52,6 +79,53 @@ export interface IStorage {
   getAviatorBetsForRound(roundId: string): Promise<AviatorBet[]>;
   getUserAviatorBet(userId: string, roundId: string): Promise<AviatorBet | undefined>;
   getUserAviatorBets(userId: string, limit?: number): Promise<AviatorBet[]>;
+
+  // Cricket operations
+  // Teams
+  createCricketTeam(team: InsertCricketTeam): Promise<CricketTeam>;
+  getCricketTeams(): Promise<CricketTeam[]>;
+  getCricketTeam(id: string): Promise<CricketTeam | undefined>;
+  
+  // Matches
+  createCricketMatch(match: InsertCricketMatch): Promise<CricketMatch>;
+  updateCricketMatch(id: string, updates: Partial<CricketMatch>): Promise<void>;
+  getCricketMatches(status?: string): Promise<CricketMatch[]>;
+  getCricketMatch(id: string): Promise<CricketMatch | undefined>;
+  
+  // Players
+  createCricketPlayer(player: InsertCricketPlayer): Promise<CricketPlayer>;
+  getCricketPlayers(teamId?: string): Promise<CricketPlayer[]>;
+  getCricketPlayer(id: string): Promise<CricketPlayer | undefined>;
+  
+  // Match innings
+  createMatchInnings(innings: InsertMatchInnings): Promise<MatchInnings>;
+  updateMatchInnings(id: string, updates: Partial<MatchInnings>): Promise<void>;
+  getMatchInnings(matchId: string): Promise<MatchInnings[]>;
+  getCurrentMatchInnings(matchId: string): Promise<MatchInnings | undefined>;
+  
+  // Ball events
+  createBallEvent(event: InsertBallEvent): Promise<BallEvent>;
+  getBallEvents(matchId: string, inningsId?: string): Promise<BallEvent[]>;
+  getLatestBallEvents(matchId: string, limit?: number): Promise<BallEvent[]>;
+  
+  // Player match stats
+  createPlayerMatchStats(stats: InsertPlayerMatchStats): Promise<PlayerMatchStats>;
+  updatePlayerMatchStats(id: string, updates: Partial<PlayerMatchStats>): Promise<void>;
+  getPlayerMatchStats(matchId: string, playerId?: string): Promise<PlayerMatchStats[]>;
+  
+  // Fall of wickets
+  createFallOfWickets(fow: InsertFallOfWickets): Promise<FallOfWickets>;
+  getFallOfWickets(matchId: string, inningsId?: string): Promise<FallOfWickets[]>;
+  
+  // API monitoring
+  logApiCall(log: InsertApiCallLog): Promise<void>;
+  getApiCallLogs(provider?: string, matchId?: string, limit?: number): Promise<ApiCallLog[]>;
+  
+  // API configuration
+  createCricketApiConfig(config: InsertCricketApiConfig): Promise<CricketApiConfig>;
+  updateCricketApiConfig(id: string, updates: Partial<CricketApiConfig>): Promise<void>;
+  getCricketApiConfigs(): Promise<CricketApiConfig[]>;
+  getActiveCricketApiConfig(provider: string): Promise<CricketApiConfig | undefined>;
 }
 
 export class DatabaseStorage implements IStorage {
@@ -313,6 +387,210 @@ export class DatabaseStorage implements IStorage {
       .returning();
 
     return result;
+  }
+
+  // Cricket operations implementation
+  
+  // Teams
+  async createCricketTeam(team: InsertCricketTeam): Promise<CricketTeam> {
+    const [newTeam] = await db.insert(cricketTeams).values(team).returning();
+    return newTeam;
+  }
+
+  async getCricketTeams(): Promise<CricketTeam[]> {
+    return await db.select().from(cricketTeams);
+  }
+
+  async getCricketTeam(id: string): Promise<CricketTeam | undefined> {
+    const [team] = await db.select().from(cricketTeams).where(eq(cricketTeams.id, id));
+    return team;
+  }
+
+  // Matches
+  async createCricketMatch(match: InsertCricketMatch): Promise<CricketMatch> {
+    const [newMatch] = await db.insert(cricketMatches).values(match).returning();
+    return newMatch;
+  }
+
+  async updateCricketMatch(id: string, updates: Partial<CricketMatch>): Promise<void> {
+    await db.update(cricketMatches)
+      .set({ ...updates, lastUpdated: new Date() })
+      .where(eq(cricketMatches.id, id));
+  }
+
+  async getCricketMatches(status?: string): Promise<CricketMatch[]> {
+    if (status) {
+      return await db.select().from(cricketMatches).where(eq(cricketMatches.status, status));
+    }
+    return await db.select().from(cricketMatches).orderBy(desc(cricketMatches.scheduledAt));
+  }
+
+  async getCricketMatch(id: string): Promise<CricketMatch | undefined> {
+    const [match] = await db.select().from(cricketMatches).where(eq(cricketMatches.id, id));
+    return match;
+  }
+
+  // Players
+  async createCricketPlayer(player: InsertCricketPlayer): Promise<CricketPlayer> {
+    const [newPlayer] = await db.insert(cricketPlayers).values(player).returning();
+    return newPlayer;
+  }
+
+  async getCricketPlayers(teamId?: string): Promise<CricketPlayer[]> {
+    if (teamId) {
+      return await db.select().from(cricketPlayers).where(eq(cricketPlayers.teamId, teamId));
+    }
+    return await db.select().from(cricketPlayers);
+  }
+
+  async getCricketPlayer(id: string): Promise<CricketPlayer | undefined> {
+    const [player] = await db.select().from(cricketPlayers).where(eq(cricketPlayers.id, id));
+    return player;
+  }
+
+  // Match innings
+  async createMatchInnings(innings: InsertMatchInnings): Promise<MatchInnings> {
+    const [newInnings] = await db.insert(matchInnings).values(innings).returning();
+    return newInnings;
+  }
+
+  async updateMatchInnings(id: string, updates: Partial<MatchInnings>): Promise<void> {
+    await db.update(matchInnings)
+      .set({ ...updates, updatedAt: new Date() })
+      .where(eq(matchInnings.id, id));
+  }
+
+  async getMatchInnings(matchId: string): Promise<MatchInnings[]> {
+    return await db.select()
+      .from(matchInnings)
+      .where(eq(matchInnings.matchId, matchId))
+      .orderBy(matchInnings.inningsNumber);
+  }
+
+  async getCurrentMatchInnings(matchId: string): Promise<MatchInnings | undefined> {
+    const [innings] = await db.select()
+      .from(matchInnings)
+      .where(and(eq(matchInnings.matchId, matchId), eq(matchInnings.status, "in_progress")))
+      .limit(1);
+    return innings;
+  }
+
+  // Ball events
+  async createBallEvent(event: InsertBallEvent): Promise<BallEvent> {
+    const [newEvent] = await db.insert(ballEvents).values(event).returning();
+    return newEvent;
+  }
+
+  async getBallEvents(matchId: string, inningsId?: string): Promise<BallEvent[]> {
+    if (inningsId) {
+      return await db.select()
+        .from(ballEvents)
+        .where(and(eq(ballEvents.matchId, matchId), eq(ballEvents.inningsId, inningsId)))
+        .orderBy(ballEvents.sequence);
+    }
+    
+    return await db.select()
+      .from(ballEvents)
+      .where(eq(ballEvents.matchId, matchId))
+      .orderBy(ballEvents.sequence);
+  }
+
+  async getLatestBallEvents(matchId: string, limit: number = 10): Promise<BallEvent[]> {
+    return await db.select()
+      .from(ballEvents)
+      .where(eq(ballEvents.matchId, matchId))
+      .orderBy(desc(ballEvents.sequence))
+      .limit(limit);
+  }
+
+  // Player match stats
+  async createPlayerMatchStats(stats: InsertPlayerMatchStats): Promise<PlayerMatchStats> {
+    const [newStats] = await db.insert(playerMatchStats).values(stats).returning();
+    return newStats;
+  }
+
+  async updatePlayerMatchStats(id: string, updates: Partial<PlayerMatchStats>): Promise<void> {
+    await db.update(playerMatchStats)
+      .set({ ...updates, updatedAt: new Date() })
+      .where(eq(playerMatchStats.id, id));
+  }
+
+  async getPlayerMatchStats(matchId: string, playerId?: string): Promise<PlayerMatchStats[]> {
+    if (playerId) {
+      return await db.select()
+        .from(playerMatchStats)
+        .where(and(eq(playerMatchStats.matchId, matchId), eq(playerMatchStats.playerId, playerId)));
+    }
+    return await db.select()
+      .from(playerMatchStats)
+      .where(eq(playerMatchStats.matchId, matchId));
+  }
+
+  // Fall of wickets
+  async createFallOfWickets(fow: InsertFallOfWickets): Promise<FallOfWickets> {
+    const [newFow] = await db.insert(fallOfWickets).values(fow).returning();
+    return newFow;
+  }
+
+  async getFallOfWickets(matchId: string, inningsId?: string): Promise<FallOfWickets[]> {
+    if (inningsId) {
+      return await db.select()
+        .from(fallOfWickets)
+        .where(and(eq(fallOfWickets.matchId, matchId), eq(fallOfWickets.inningsId, inningsId)))
+        .orderBy(fallOfWickets.wicketNumber);
+    }
+    return await db.select()
+      .from(fallOfWickets)
+      .where(eq(fallOfWickets.matchId, matchId))
+      .orderBy(fallOfWickets.wicketNumber);
+  }
+
+  // API monitoring
+  async logApiCall(log: InsertApiCallLog): Promise<void> {
+    await db.insert(apiCallLogs).values(log);
+  }
+
+  async getApiCallLogs(provider?: string, matchId?: string, limit: number = 100): Promise<ApiCallLog[]> {
+    const conditions = [];
+    if (provider) conditions.push(eq(apiCallLogs.provider, provider));
+    if (matchId) conditions.push(eq(apiCallLogs.matchId, matchId));
+    
+    if (conditions.length > 0) {
+      return await db.select()
+        .from(apiCallLogs)
+        .where(and(...conditions))
+        .orderBy(desc(apiCallLogs.timestamp))
+        .limit(limit);
+    }
+    
+    return await db.select()
+      .from(apiCallLogs)
+      .orderBy(desc(apiCallLogs.timestamp))
+      .limit(limit);
+  }
+
+  // API configuration
+  async createCricketApiConfig(config: InsertCricketApiConfig): Promise<CricketApiConfig> {
+    const [newConfig] = await db.insert(cricketApiConfig).values(config).returning();
+    return newConfig;
+  }
+
+  async updateCricketApiConfig(id: string, updates: Partial<CricketApiConfig>): Promise<void> {
+    await db.update(cricketApiConfig)
+      .set({ ...updates, updatedAt: new Date() })
+      .where(eq(cricketApiConfig.id, id));
+  }
+
+  async getCricketApiConfigs(): Promise<CricketApiConfig[]> {
+    return await db.select().from(cricketApiConfig);
+  }
+
+  async getActiveCricketApiConfig(provider: string): Promise<CricketApiConfig | undefined> {
+    const [config] = await db.select()
+      .from(cricketApiConfig)
+      .where(and(eq(cricketApiConfig.provider, provider), eq(cricketApiConfig.isActive, true)))
+      .limit(1);
+    return config;
   }
 }
 

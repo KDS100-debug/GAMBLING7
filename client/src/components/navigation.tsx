@@ -3,7 +3,7 @@ import { Button } from "@/components/ui/button";
 import { Badge } from "@/components/ui/badge";
 import { useAuth } from "@/hooks/useAuth";
 import { useQuery } from "@tanstack/react-query";
-import { HomeIcon, GamepadIcon, WalletIcon, UserIcon, MenuIcon, CoinsIcon } from "lucide-react";
+import { HomeIcon, GamepadIcon, WalletIcon, UserIcon, MenuIcon, CoinsIcon, TrophyIcon } from "lucide-react";
 import {
   Sheet,
   SheetContent,
@@ -25,6 +25,7 @@ export default function Navigation() {
   const navItems = [
     { href: "/", icon: HomeIcon, label: "Dashboard" },
     { href: "/games", icon: GamepadIcon, label: "Games" },
+    { href: "/scoreboard", icon: TrophyIcon, label: "Live Cricket" },
     { href: "/payment-topup", icon: WalletIcon, label: "Top Up" },
     { href: "/withdrawal", icon: CoinsIcon, label: "Withdraw" },
   ];

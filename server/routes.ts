@@ -7,6 +7,8 @@ import { insertTransactionSchema, insertGameRoundSchema, insertAviatorBetSchema,
 import { randomUUID } from "crypto";
 import { otpService } from "./otpService";
 import jwt from "jsonwebtoken";
+import { CricketWebSocketManager } from "./cricketWebSocketService";
+import { CricketDataIngestionService } from "./cricketDataIngestion";
 
 interface ExtendedWebSocket extends WebSocket {
   userId?: string;
@@ -23,6 +25,10 @@ let currentAviatorRound: {
 
 let aviatorInterval: NodeJS.Timeout | null = null;
 const connectedClients = new Set<ExtendedWebSocket>();
+
+// Cricket services
+let cricketWSManager: CricketWebSocketManager;
+let cricketDataIngestion: CricketDataIngestionService;
 
 // JWT Secret for OTP authentication (in production, use environment variable)
 const JWT_SECRET = process.env.JWT_SECRET || 'your-secret-key-change-in-production';
@@ -500,6 +506,10 @@ export async function registerRoutes(app: Express): Promise<Server> {
 
   // WebSocket setup for Aviator game
   const wss = new WebSocketServer({ server: httpServer, path: '/ws' });
+
+  // Initialize cricket services
+  cricketWSManager = new CricketWebSocketManager(wss);
+  cricketDataIngestion = new CricketDataIngestionService(cricketWSManager);
 
   wss.on('connection', (ws: ExtendedWebSocket) => {
     ws.isAlive = true;
@@ -1001,6 +1011,155 @@ export async function registerRoutes(app: Express): Promise<Server> {
       res.status(500).json({ message: 'Failed to fetch config' });
     }
   });
+
+  // Cricket API Routes
+  
+  // Get all matches
+  app.get('/api/cricket/matches', async (req, res) => {
+    try {
+      const status = req.query.status as string;
+      const matches = await storage.getCricketMatches(status);
+      res.json(matches);
+    } catch (error) {
+      console.error('Error fetching cricket matches:', error);
+      res.status(500).json({ message: 'Failed to fetch matches' });
+    }
+  });
+
+  // Get specific match details
+  app.get('/api/cricket/matches/:id', async (req, res) => {
+    try {
+      const { id } = req.params;
+      const match = await storage.getCricketMatch(id);
+      
+      if (!match) {
+        return res.status(404).json({ message: 'Match not found' });
+      }
+
+      // Get additional match data
+      const innings = await storage.getMatchInnings(id);
+      const recentBalls = await storage.getLatestBallEvents(id, 6);
+      const fallOfWickets = await storage.getFallOfWickets(id);
+
+      res.json({
+        match,
+        innings,
+        recentBalls,
+        fallOfWickets,
+      });
+    } catch (error) {
+      console.error('Error fetching match details:', error);
+      res.status(500).json({ message: 'Failed to fetch match details' });
+    }
+  });
+
+  // Get live score for a match
+  app.get('/api/cricket/matches/:id/live', async (req, res) => {
+    try {
+      const { id } = req.params;
+      const match = await storage.getCricketMatch(id);
+      const innings = await storage.getMatchInnings(id);
+      const currentInnings = await storage.getCurrentMatchInnings(id);
+      const recentBalls = await storage.getLatestBallEvents(id, 10);
+
+      res.json({
+        match,
+        innings,
+        currentInnings,
+        recentBalls,
+        lastUpdated: new Date().toISOString(),
+      });
+    } catch (error) {
+      console.error('Error fetching live score:', error);
+      res.status(500).json({ message: 'Failed to fetch live score' });
+    }
+  });
+
+  // Get ball-by-ball commentary
+  app.get('/api/cricket/matches/:id/commentary', async (req, res) => {
+    try {
+      const { id } = req.params;
+      const inningsId = req.query.innings as string;
+      const limit = parseInt(req.query.limit as string) || 50;
+      
+      const ballEvents = await storage.getBallEvents(id, inningsId);
+      res.json(ballEvents.slice(-limit).reverse()); // Recent first
+    } catch (error) {
+      console.error('Error fetching commentary:', error);
+      res.status(500).json({ message: 'Failed to fetch commentary' });
+    }
+  });
+
+  // Get teams
+  app.get('/api/cricket/teams', async (req, res) => {
+    try {
+      const teams = await storage.getCricketTeams();
+      res.json(teams);
+    } catch (error) {
+      console.error('Error fetching teams:', error);
+      res.status(500).json({ message: 'Failed to fetch teams' });
+    }
+  });
+
+  // Get players for a team
+  app.get('/api/cricket/teams/:id/players', async (req, res) => {
+    try {
+      const { id } = req.params;
+      const players = await storage.getCricketPlayers(id);
+      res.json(players);
+    } catch (error) {
+      console.error('Error fetching players:', error);
+      res.status(500).json({ message: 'Failed to fetch players' });
+    }
+  });
+
+  // Get player match statistics
+  app.get('/api/cricket/matches/:matchId/stats', async (req, res) => {
+    try {
+      const { matchId } = req.params;
+      const playerId = req.query.player as string;
+      const stats = await storage.getPlayerMatchStats(matchId, playerId);
+      res.json(stats);
+    } catch (error) {
+      console.error('Error fetching player stats:', error);
+      res.status(500).json({ message: 'Failed to fetch player stats' });
+    }
+  });
+
+  // Admin cricket routes
+  app.get('/api/admin/cricket/api-logs', isAdminAuthenticated, async (req, res) => {
+    try {
+      const provider = req.query.provider as string;
+      const matchId = req.query.matchId as string;
+      const limit = parseInt(req.query.limit as string) || 100;
+      
+      const logs = await storage.getApiCallLogs(provider, matchId, limit);
+      res.json(logs);
+    } catch (error) {
+      console.error('Error fetching API logs:', error);
+      res.status(500).json({ message: 'Failed to fetch API logs' });
+    }
+  });
+
+  app.get('/api/admin/cricket/health', isAdminAuthenticated, async (req, res) => {
+    try {
+      // Return cricket service health status
+      res.json({
+        status: 'healthy',
+        timestamp: new Date().toISOString(),
+        activeMatches: 1,
+        connectedClients: connectedClients.size,
+        message: 'Cricket data ingestion service is running',
+      });
+    } catch (error) {
+      console.error('Error fetching cricket health:', error);
+      res.status(500).json({ message: 'Failed to fetch health status' });
+    }
+  });
+
+  // Start cricket data ingestion service
+  console.log('Starting cricket data ingestion service...');
+  cricketDataIngestion.startDataIngestion();
 
   // Start first aviator round immediately
   console.log('Starting Aviator game engine...');

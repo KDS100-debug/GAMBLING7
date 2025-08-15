@@ -15,6 +15,7 @@ import PaymentTopup from "@/pages/payment-topup";
 import Withdrawal from "@/pages/withdrawal";
 import AdminLogin from "@/pages/admin-login";
 import AdminDashboard from "@/pages/admin-dashboard";
+import Scoreboard from "@/pages/scoreboard";
 import NotFound from "@/pages/not-found";
 
 function Router() {
@@ -23,6 +24,8 @@ function Router() {
   return (
     <Switch>
       <Route path="/otp-login" component={OtpLogin} />
+      <Route path="/scoreboard" component={Scoreboard} />
+      <Route path="/admin/login" component={AdminLogin} />
       {isLoading || !isAuthenticated ? (
         <Route path="/" component={Landing} />
       ) : (
@@ -34,7 +37,6 @@ function Router() {
           <Route path="/aviator-game" component={AviatorGame} />
           <Route path="/payment-topup" component={PaymentTopup} />
           <Route path="/withdrawal" component={Withdrawal} />
-          <Route path="/admin/login" component={AdminLogin} />
           <Route path="/admin/dashboard" component={AdminDashboard} />
         </>
       )}

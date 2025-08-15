@@ -18,14 +18,16 @@ export default function Withdrawal() {
   const { toast } = useToast();
 
   // Get user balance
-  const { data: balance } = useQuery({
+  const { data: balanceData } = useQuery({
     queryKey: ['/api/balance'],
     queryFn: async () => {
       const response = await apiRequest('GET', '/api/balance');
       const data = await response.json();
-      return data.balance;
+      return data;
     }
   });
+
+  const balance = balanceData?.balance || 0;
 
   // Get withdrawal conversion rate (1 point = 0.08 INR by default)
   const { data: conversionRate } = useQuery({
