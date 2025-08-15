@@ -1,0 +1,251 @@
+Build a Real-Time IPL Scoreboard (to hand to an engineer / AI agent)
+
+Executive summary (goal):
+Design and deliver a production-grade, real-time IPL scoreboard that ingests live match data from an external source (preferred: official/licensed API; fallback: well-controlled scraping with legal review), normalizes it, and streams live updates to web and mobile clients with sub-second/near-real-time UX. The system must be resilient, auditable, rate-limit aware, and compliant with the data provider’s TOS.
+
+1) Project scope & acceptance criteria
+
+Minimum viable feature set
+
+Live list of ongoing IPL matches with scoreline (team names, runs/wickets, overs, run-rate, required runs, target, innings, toss/winner when complete).
+
+Ball-by-ball updates (where available) pushed to clients in real time.
+
+Match detail view: scorecard (bat/bowl), fall-of-wicks, commentary feed.
+
+Client reconnect / gap-fill logic so no events are missed after transient disconnects.
+
+Admin dashboard: data feed health, latency metrics, API usage and error rates.
+
+Non-functional
+
+Data freshness SLA: updates delivered to clients within 1–3s of source update (where source supports that cadence).
+
+Scalable: support many concurrent clients (use WebSockets/Socket.IO or server-push).
+
+Secure: API keys stored safely; rate limits respected; logging and monitoring enabled.
+
+Deliverables
+
+Backend service(s) with documented REST/WebSocket endpoints.
+
+Frontend live scoreboard (React recommended) demonstrating real-time updates.
+
+Deployment scripts / Dockerfiles and run instructions.
+
+Test plan and integration checklist with the selected data provider.
+
+2) Data source options (pick one; recommended = licensed API)
+
+Recommended: licensed cricket data providers (production, commercial). Examples: SportMonks, Sportradar, SportDevs, EntitySport — they provide official/paid live feeds and ball-by-ball events suitable for production use. Use these first for legality, reliability, and service level guarantees. 
+Sportmonks
++1
+developer.sportradar.com
+
+Affordable / Developer tiers / freemium: CricAPI / cricketdata.org / api-cricket — good for prototyping but confirm coverage/limits and licensing for IPL. 
+cricapi.com
+Free Cricket Data API
+api-cricket.com
+
+Unofficial / scraping / reverse-engineered endpoints: There exist community projects and wrappers for ESPNcricinfo / Cricbuzz JSON endpoints. These can work for PoC but carry legal/TOS/robustness risks; avoid for production unless you have legal clearance. Examples of community wrappers on GitHub exist. 
+ESPN Cricinfo
+GitHub
++1
+
+3) Legal & compliance guardrails (must include)
+
+Prefer licensed API with a written contract for production (data redistribution, caching, attribution, usage caps). See vendor docs/pricing. 
+Sportmonks
+developer.sportradar.com
+
+If considering scraping, obtain legal/TOS review before deployment; implement strict rate limiting, caching, and attribution rules; be ready to switch providers if blocked. 
+ESPN Cricinfo
+GitHub
+
+4) High-level architecture (recommended)
+
+Ingest layer
+
+Connector service(s) that call the licensed API or poll official endpoints / subscribe to webhooks. Normalizes incoming data into internal canonical event format.
+
+Rate limiter + backoff + retry logic.
+
+Optionally, a lightweight scraping adapter only for non-commercial PoC (explicitly flagged).
+
+Message bus
+
+Lightweight queue/streaming (Redis Streams, Kafka, or RabbitMQ) for decoupling ingestion and distribution.
+
+Real-time distribution
+
+WebSocket service (Socket.IO or native WebSocket) or server-sent events (SSE) for browser/mobile clients.
+
+Provide both broadcast channels (match-level topics) and user subscriptions.
+
+Cache / gap fill
+
+Fast in-memory cache (Redis) storing latest match snapshot + recent event history for reconnects.
+
+API layer
+
+REST endpoints for initial match list, match metadata, historical scorecard.
+
+WebSocket for push updates.
+
+Frontend
+
+React SPA (or mobile client) subscribes to match topics and renders live scoreboard and ball-by-ball feed.
+
+Monitoring & observability
+
+Prometheus/Grafana or hosted monitoring for latency, error rates, API usage, cache hit ratio.
+
+Security
+
+Secrets manager for API keys (Vault/AWS Secrets Manager), TLS for all endpoints, input validation, CORS whitelisting.
+
+5) Canonical data model (example JSON events)
+
+Match snapshot (REST / initial load)
+
+{
+  "matchId": "ipl-2025-1234",
+  "teams": {"home": {"id":"MI","name":"Mumbai Indians"}, "away": {"id":"CSK","name":"Chennai Super Kings"}},
+  "status": "in_progress", // pre_match | in_progress | innings_break | finished
+  "currentInnings": 2,
+  "score": [
+    {"inning":1,"team":"MI","runs":187,"wickets":4,"overs":"20.0"},
+    {"inning":2,"team":"CSK","runs":120,"wickets":6,"overs":"15.3"}
+  ],
+  "lastUpdated": "2025-08-15T12:34:56.789Z"
+}
+
+
+Ball event (WebSocket push)
+
+{
+  "type":"ball",
+  "matchId":"ipl-2025-1234",
+  "over":16,
+  "ballInOver":3,
+  "batsman":"Rohit Sharma",
+  "bowler":"Jasprit Bumrah",
+  "runs":4,
+  "extras":0,
+  "wicket": false,
+  "scoreAfterBall": {"team":"MI","runs":200,"wickets":5,"overs":"16.3"},
+  "timestamp":"2025-08-15T12:35:03.000Z"
+}
+
+6) Real-time delivery patterns (choose one)
+
+Push from provider (webhooks / stream) -> ideal. Consume and forward to clients with minimal latency. (Use Socket.IO rooms per match).
+
+Polling + delta detection -> call provider every X seconds (X = provider-recommended min polling interval). Compute diffs and publish only deltas to reduce bandwidth.
+
+Hybrid -> webhook when available + fallback polling.
+
+Implementation notes: respect provider rate limits; implement jittered exponential backoff on 429s; use conditional requests / ETags if supported. 
+Free Cricket Data API
+SportDevs
+
+7) Reliability & client UX patterns
+
+Reconnect / gap fill: on client reconnect, fetch snapshot REST endpoint and replay events from cached history to fill any missed balls.
+
+Idempotency: events should include an incremental sequence number to dedupe re-sent events.
+
+Graceful degradation: show “last updated X seconds ago” and fade to polling mode if real-time feed is disrupted.
+
+Throttling on client: clients should not request updates more than necessary; server pushes deltas.
+
+8) Security, rate limiting & caching
+
+Store provider credentials in a secrets manager; never expose keys to frontend.
+
+Implement per-tenant and per-IP rate limits on your public API.
+
+Cache canonical snapshots in Redis with short TTL (e.g., 10–30s) to minimize provider calls; for ball-by-ball, append to a capped list for quick replay.
+
+9) Observability & testing
+
+Instrument latencies: provider → ingestion → publish → client ack.
+
+Alerts on: ingestion failures, consecutive 429s or 5xx from provider, message lag > threshold, cache miss spike.
+
+Automated E2E tests: simulate provider events and assert client receives correct deltas and gap-fill behavior.
+
+10) Implementation checklist / technical stack (recommended)
+
+Backend: Node.js (Express) + Socket.IO OR Python (FastAPI) + WebSockets; containerized (Docker).
+
+Message bus / cache: Redis (Streams + pub/sub) or Kafka for high throughput.
+
+DB (optional): PostgreSQL for match metadata + logs.
+
+Frontend: React (hooks) or Next.js for SSR, Socket.IO client or native WebSocket client.
+
+Monitoring: Prometheus + Grafana, Sentry for errors.
+
+CI/CD: GitHub Actions / GitLab CI; Docker images to registry; IaC with Terraform / CloudFormation.
+
+11) Example minimal flow (developer task list)
+
+Select provider and obtain API access. (If prototyping, create account at CricAPI or API-Cricket; for production, engage SportMonks/Sportradar). 
+cricapi.com
+api-cricket.com
+Sportmonks
+
+Implement ingestion adapter: authorization, polling/webhook handler, parse provider payload -> normalize to canonical model.
+
+Publish to message bus and persist recent events in Redis list per matchId.
+
+Implement WebSocket server: clients subscribe to /match/{matchId}; server broadcasts normalized events.
+
+Frontend: create scoreboard UI, real-time subscription, reconnect & gap-fill logic.
+
+Add monitoring and create dashboards for: API call rate, failed calls, event publish latency, client connection count.
+
+QA & UAT: run simulated matches; verify ordering, deduping, and reconnect behavior.
+
+12) Sample acceptance tests (automatable)
+
+When ingestion receives a ball event A then B then C, clients receive A→B→C in order within latency threshold.
+
+After client disconnect, replay recency buffer returns correct sequence and final snapshot matches last event.
+
+System recovers from provider 429 by backing off and resumes without data corruption.
+
+13) Security & legal checklist (deliver with MVP)
+
+Signed license / terms with data vendor permitting your usage pattern (display + caching + API limits).
+
+Rate limit enforcement and logs of provider usage.
+
+Privacy/data handling checklist (no PII in cricket events but log sanitization still required).
+
+14) Appendix — Useful vendor leads & resources (for procurement & prototyping)
+
+SportMonks — commercial Cricket API (IPL support, ball-by-ball). 
+Sportmonks
+
+Sportradar — enterprise sports data (real-time feeds, contractual SLAs). 
+developer.sportradar.com
+
+CricAPI / cricketdata.org / api-cricket — developer/freemium options for PoC. 
+cricapi.com
+Free Cricket Data API
+api-cricket.com
+
+EntitySport / SportDevs / Goalserve — additional providers with ball-by-ball feeds. 
+Entity Digital Sports
+SportDevs
+goalserve.com
+
+Community wrappers & unofficial endpoints (for prototyping only; legal risk): espncricinfo wrappers and GitHub scrapers. Use only for dev experiments. 
+GitHub
++1
+
+15) One-paragraph developer prompt (compact version to paste into a ticket/AI agent)
+
+“Build a production-grade real-time IPL scoreboard: ingest live match data from a licensed cricket data API (primary) with a documented polling/webhook adapter (fallback: controlled scraping with legal sign-off), normalize to a canonical event model, persist short-term event history in Redis, and stream delta updates to browser/mobile clients via WebSockets (Socket.IO). Include REST snapshot endpoints for initial loads, reconnect/gap-fill logic, rate-limit/backoff, monitoring dashboards, and deployment artifacts (Docker + CI). Provide full docs, test cases, and an admin panel for feed health and API usage. Prioritize using SportMonks/Sportradar or similar paid provider for production; CricAPI or API-Cricket are acceptable for prototyping.”
